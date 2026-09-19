@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Chess, type Color, type Move, type Piece, type Square } from "chess.js";
-import { chooseMove, type JevInsight } from "./lib/jev";
+import { chooseMove, type GameProvider, type JevInsight } from "./lib/jev";
 import {
   deleteGame,
   listGames,
   loadApiKey,
+  loadProvider,
   saveApiKey,
   saveGame,
+  saveProvider,
   type GameRecord,
 } from "./lib/storage";
 import { files, formatClock, moveToUci, pieceGlyphs, ranks, squares } from "./lib/chess";
@@ -65,6 +67,7 @@ function App() {
   const [thinking, setThinking] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [provider, setProvider] = useState<GameProvider>("opencode");
   const [showSettings, setShowSettings] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,12 +90,13 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([listGames(), loadApiKey()]).then(([savedGames, savedApiKey]) => {
+    Promise.all([listGames(), loadApiKey(), loadProvider()]).then(([savedGames, savedApiKey, savedProvider]) => {
       if (!active) return;
       setGames(savedGames);
       setApiKey(savedApiKey);
       setApiKeyInput(savedApiKey ?? "");
-      setShowSettings(savedApiKey === null);
+      setProvider(savedProvider);
+      setShowSettings(savedApiKey === null && savedProvider === "opencode");
       if (savedGames[0]) {
         restoreGame(savedGames[0]);
       } else {
@@ -160,7 +164,7 @@ function App() {
   }
 
   async function makeJevMove(position: Chess): Promise<void> {
-    if (!apiKey) {
+    if (provider === "opencode" && !apiKey) {
       setShowSettings(true);
       setError("Add your OpenCode API key before Jev can move.");
       return;
@@ -169,7 +173,7 @@ function App() {
     setThinking(true);
     setError(null);
     try {
-      const response = await chooseMove(apiKey, position.fen(), position.pgn(), position.moves({ verbose: true }));
+      const response = await chooseMove(provider, apiKey, position.fen(), position.pgn(), position.moves({ verbose: true }));
       const move = position.move(response.choice);
       if (!move) throw new Error("Jev selected a move that is no longer legal.");
       setFen(position.fen());
@@ -219,14 +223,17 @@ function App() {
     else setSelected(null);
   }
 
-  async function saveKey(): Promise<void> {
-    const trimmed = apiKeyInput.trim();
-    if (!trimmed) {
-      setError("Enter an API key to connect Jev.");
-      return;
+  async function saveSettings(): Promise<void> {
+    await saveProvider(provider);
+    if (provider === "opencode") {
+      const trimmed = apiKeyInput.trim();
+      if (!trimmed) {
+        setError("Enter an API key to connect Jev.");
+        return;
+      }
+      await saveApiKey(trimmed);
+      setApiKey(trimmed);
     }
-    await saveApiKey(trimmed);
-    setApiKey(trimmed);
     setShowSettings(false);
     setError(null);
   }
@@ -288,11 +295,13 @@ function App() {
           <section className="decision-card dark-card">
             <div className="card-heading"><span>INSIDE THE DECISION</span><span className="live-pill">{thinking ? "THINKING" : "LIVE RESULT"}</span></div>
             {insight ? <>
-              <p className="decision-kicker">BLACK · JEV CHOSE</p><h2>{insight.chosenSan}</h2>
-              <p className="decision-detail">Jev selected the highest-probability legal move.</p>
-              <div className="choice-heading"><span>TOP CHOICES</span><span>PROBABILITY</span></div>
-              <div className="probabilities">{insight.candidates.map((candidate) => <div className="probability-row" key={candidate.uci}><strong>{candidate.san}</strong><span><i style={{ width: `${Math.max(2, candidate.probability * 100)}%` }} /></span><b>{Math.round(candidate.probability * 100)}%</b></div>)}</div>
-              <div className="decision-metrics"><div><span>API ROUND TRIP</span><strong>{insight.latencyMs} <small>ms</small></strong></div><div><span>CONFIDENCE</span><strong>{Math.round(insight.confidence * 100)}<small>%</small></strong></div></div>
+              <p className="decision-kicker">BLACK · {insight.model === "classifier.dev" ? "CLASSIFIER CHOSE" : "JEV CHOSE"}</p><h2>{insight.chosenSan}</h2>
+              <p className="decision-detail">{insight.model === "classifier.dev" ? "classifier.dev selected a legal move." : "Jev selected the highest-probability legal move."}</p>
+              {insight.candidates.length > 0 && <>
+                <div className="choice-heading"><span>TOP CHOICES</span><span>PROBABILITY</span></div>
+                <div className="probabilities">{insight.candidates.map((candidate) => <div className="probability-row" key={candidate.uci}><strong>{candidate.san}</strong><span><i style={{ width: `${Math.max(2, candidate.probability * 100)}%` }} /></span><b>{Math.round(candidate.probability * 100)}%</b></div>)}</div>
+              </>}
+              <div className="decision-metrics"><div><span>API ROUND TRIP</span><strong>{insight.latencyMs} <small>ms</small></strong></div><div><span>CONFIDENCE</span><strong>{insight.confidence === null ? "—" : <>{Math.round(insight.confidence * 100)}<small>%</small></>}</strong></div></div>
             </> : <div className="empty-decision"><span className="empty-star">✳</span><strong>{thinking ? "Jev is reading the position…" : "Make the first move."}</strong><p>{thinking ? "A structured choice is on its way back." : "Jev will rank every legal response after you move."}</p></div>}
           </section>
 
@@ -306,7 +315,7 @@ function App() {
 
       {error && <button className="error-toast" onClick={() => setError(null)}>{error}<span>×</span></button>}
       {!ready && <div className="loading">Opening local game lab…</div>}
-      {showSettings && <div className="modal-backdrop" onClick={() => setShowSettings(false)}><section className="settings-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">✳ &nbsp;UNDER THE HOOD</span><h2>Connect Jev</h2></div><button onClick={() => setShowSettings(false)}>×</button></div><p>Use your OpenCode Zen API key for Jev 1.13 Free. It is encrypted before being stored in this browser's local SQLite database.</p><label>OpenCode API key<input type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} placeholder="sk-…" autoFocus /></label><div className="settings-actions"><button className="text-button" onClick={() => setShowSettings(false)}>Cancel</button><button className="pause-button compact" onClick={() => void saveKey()}>Save encrypted key</button></div></section></div>}
+      {showSettings && <div className="modal-backdrop" onClick={() => setShowSettings(false)}><section className="settings-modal" onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">✳ &nbsp;UNDER THE HOOD</span><h2>Choose your player</h2></div><button onClick={() => setShowSettings(false)}>×</button></div><p>{provider === "opencode" ? "Use your OpenCode Zen API key for Jev 1.13 Free. It is encrypted before being stored in this browser's local SQLite database." : "classifier.dev chooses the next legal move using Jev behind a simple classifier endpoint."}</p><div className="segmented" aria-label="Move provider"><button className={provider === "opencode" ? "selected-button" : ""} onClick={() => setProvider("opencode")}>OpenCode</button><button className={provider === "classifier" ? "selected-button" : ""} onClick={() => setProvider("classifier")}>classifier.dev</button></div>{provider === "opencode" && <label>OpenCode API key<input type="password" value={apiKeyInput} onChange={(event) => setApiKeyInput(event.target.value)} placeholder="sk-…" autoFocus /></label>}<div className="settings-actions"><button className="text-button" onClick={() => setShowSettings(false)}>Cancel</button><button className="pause-button compact" onClick={() => void saveSettings()}>Save player</button></div></section></div>}
     </main>
   );
 }

@@ -1,6 +1,6 @@
 # Jev Plays Chess
 
-A browser chess lab where you play White against Jev 1.13 Free through OpenCode Zen. Games stay on the device in SQLite persisted through IndexedDB.
+A browser chess lab where you play White against Jev 1.13 Free through OpenCode Zen or classifier.dev. Games stay on the device in SQLite persisted through IndexedDB.
 
 
 ![](./assets/demo.png)
@@ -9,15 +9,16 @@ A browser chess lab where you play White against Jev 1.13 Free through OpenCode 
 - React + TypeScript + Vite
 - `chess.js` for legal moves, check, checkmate, and PGN
 - `sql.js` for browser-side SQLite
-- Web Crypto AES-GCM for encrypting the saved Jev API key
-- Cloudflare Worker + Wrangler for the same-origin Jev proxy and static deployment
+- Web Crypto AES-GCM for encrypting the saved OpenCode API key
+- Cloudflare Worker + Wrangler for the same-origin OpenCode proxy and static deployment
+- classifier.dev as an optional keyless move provider
 
 ## Requirements
 
 - Node.js 20+
 - npm
 - A Cloudflare account for deployment
-- An OpenCode API key with access to `jev-1.13-free`
+- An OpenCode API key with access to `jev-1.13-free` when using OpenCode; classifier.dev does not require a key
 
 ## Local development
 
@@ -35,7 +36,7 @@ npm run dev
 
 Open the local URL printed by Vite. The Vite development server proxies `/api/jev` to OpenCode so the browser does not hit the upstream CORS restriction directly.
 
-The first visit asks for an OpenCode API key. It is encrypted before being written into the local SQLite database. The database and encryption key are browser-local; clearing site data removes them.
+On first visit, choose **OpenCode** or **classifier.dev** in **Under the hood**. OpenCode asks for an API key, which is encrypted before being written into the local SQLite database. The provider can be changed later. The database and encryption key are browser-local; clearing site data removes them.
 
 ## Cloudflare deployment
 
@@ -68,6 +69,17 @@ npm run cf:dev
 
 This builds the app first, then starts Wrangler's local Worker runtime.
 
+### GitHub Actions deployment
+
+`.github/workflows/deploy.yml` deploys the `main` branch to Cloudflare after each push. It can also be started manually from the Actions tab.
+
+Add these repository secrets before enabling the workflow:
+
+- `CLOUDFLARE_API_TOKEN`: a Cloudflare API token with permission to edit Workers
+- `CLOUDFLARE_ACCOUNT_ID`: the Cloudflare account ID that owns the Worker
+
+The workflow installs dependencies with `npm ci`, runs the production build, and deploys with Wrangler.
+
 ## Scripts
 
 | Command | Purpose |
@@ -81,11 +93,11 @@ This builds the app first, then starts Wrangler's local Worker runtime.
 ## How a move works
 
 1. `chess.js` validates the move and updates the local position.
-2. The app sends the FEN, PGN, and all currently legal moves to `/api/jev`.
-3. The Worker forwards the request to OpenCode Zen using the browser-provided API key.
-4. Jev returns a structured Choice answer containing a selected move, probabilities, and confidence.
-5. The app validates Jev's selected UCI move before applying it.
-6. The current game and Jev's decision data are saved locally.
+2. The app sends the FEN, PGN, and all currently legal moves to the selected provider.
+3. OpenCode requests go through `/api/jev` and the Worker forwards them to OpenCode Zen using the browser-provided API key.
+4. classifier.dev receives the legal UCI moves in its classifier labels and returns one selected move.
+5. The app validates the selected UCI move before applying it.
+6. The current game and provider decision data are saved locally.
 
 Jev is a structured decision model, not a traditional chess engine. The app gives it only legal moves to choose from, so the browser remains responsible for chess rules.
 
@@ -93,9 +105,9 @@ Jev is a structured decision model, not a traditional chess engine. The app give
 
 Games never leave the browser unless their position is sent to Jev for the current move. The SQLite database is serialized into IndexedDB because browsers do not expose a general-purpose SQLite file API directly.
 
-The API key is encrypted with a non-extractable AES-GCM Web Crypto key. This protects against plaintext storage, but it is not a complete security boundary: code running in the same origin, a malicious browser extension, or compromised device could still use the decrypted key when making a move. Do not use a valuable production credential in an untrusted deployment.
+When OpenCode is selected, its API key is encrypted with a non-extractable AES-GCM Web Crypto key. This protects against plaintext storage, but it is not a complete security boundary: code running in the same origin, a malicious browser extension, or compromised device could still use the decrypted key when making a move. Do not use a valuable production credential in an untrusted deployment.
 
-The Cloudflare Worker does not store the key. It forwards the `Authorization` header for the individual request and does not log request bodies.
+The Cloudflare Worker does not store the key. It forwards the `Authorization` header for the individual OpenCode request and does not log request bodies. classifier.dev is called directly from the browser and does not require an API key.
 
 ## Project layout
 
@@ -125,7 +137,7 @@ Run `npx wrangler login` again, then confirm with `npx wrangler whoami` before r
 
 ### Jev returns `401`
 
-Open **Under the hood** in the app and replace the saved OpenCode API key.
+Open **Under the hood** in the app and replace the saved OpenCode API key, or switch to classifier.dev.
 
 ### A saved game disappeared
 

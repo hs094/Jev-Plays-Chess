@@ -3,6 +3,9 @@ import { moveToUci } from "./chess";
 
 const JEV_ENDPOINT = "/api/jev";
 const JEV_MODEL = "jev-1.13-free";
+const CLASSIFIER_ENDPOINT = "https://classifier.dev";
+
+export type GameProvider = "opencode" | "classifier";
 
 export type CandidateMove = {
   uci: string;
@@ -15,7 +18,7 @@ export type CandidateMove = {
 export type JevInsight = {
   model: string;
   chosenSan: string;
-  confidence: number;
+  confidence: number | null;
   candidates: CandidateMove[];
   latencyMs: number;
   usage?: {
@@ -38,11 +41,18 @@ type JevResponse = {
 };
 
 export async function chooseMove(
-  apiKey: string,
+  provider: GameProvider,
+  apiKey: string | null,
   fen: string,
   pgn: string,
   legalMoves: Move[],
 ): Promise<JevInsight & { choice: string }> {
+  const startedAt = performance.now();
+  if (provider === "classifier") {
+    return chooseClassifierMove(fen, pgn, legalMoves, startedAt);
+  }
+  if (!apiKey) throw new Error("An OpenCode API key is required.");
+
   const criteria = Object.fromEntries(
     legalMoves.map((move) => [
       moveToUci(move),
@@ -50,7 +60,6 @@ export async function chooseMove(
     ]),
   );
 
-  const startedAt = performance.now();
   const response = await fetch(JEV_ENDPOINT, {
     method: "POST",
     headers: {
@@ -114,5 +123,38 @@ export async function chooseMove(
     candidates,
     latencyMs: Math.round(performance.now() - startedAt),
     usage: body.usage,
+  };
+}
+
+async function chooseClassifierMove(
+  fen: string,
+  pgn: string,
+  legalMoves: Move[],
+  startedAt: number,
+): Promise<JevInsight & { choice: string }> {
+  const labels = legalMoves.map(moveToUci);
+  const prompt = [
+    "You are playing black in a chess game.",
+    `FEN: ${fen}`,
+    pgn ? `PGN: ${pgn}` : "",
+    `Choose the strongest move from these legal UCI moves: ${labels.join(", ")}`,
+    "Return exactly one UCI move and nothing else.",
+  ].filter(Boolean).join(" ");
+  const response = await fetch(`${CLASSIFIER_ENDPOINT}/${labels.join(",")}/${encodeURIComponent(prompt)}`);
+  const choice = (await response.text()).trim();
+  if (!response.ok) {
+    throw new Error(`classifier.dev request failed (${response.status})`);
+  }
+  if (!labels.includes(choice)) {
+    throw new Error("classifier.dev returned an invalid chess move.");
+  }
+
+  return {
+    choice,
+    chosenSan: legalMoves.find((move) => moveToUci(move) === choice)?.san ?? choice,
+    model: "classifier.dev",
+    confidence: null,
+    candidates: [],
+    latencyMs: Math.round(performance.now() - startedAt),
   };
 }

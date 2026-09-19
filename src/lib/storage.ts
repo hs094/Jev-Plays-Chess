@@ -1,9 +1,10 @@
 import initSqlJs, { type Database } from "sql.js";
 import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
-import type { JevInsight } from "./jev";
+import type { GameProvider, JevInsight } from "./jev";
 
 const SQLITE_BLOB_KEY = "database";
 const CRYPTO_KEY_ID = "api-key-encryption";
+const PROVIDER_KEY = "provider";
 
 export type GameRecord = {
   id: string;
@@ -176,6 +177,21 @@ function toBase64(bytes: Uint8Array): string {
 
 function fromBase64(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+export async function saveProvider(provider: GameProvider): Promise<void> {
+  const db = await getDatabase();
+  db.run(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+    [PROVIDER_KEY, provider],
+  );
+  await persistDatabase();
+}
+
+export async function loadProvider(): Promise<GameProvider> {
+  const db = await getDatabase();
+  const result = db.exec("SELECT value FROM settings WHERE key = 'provider'");
+  return result[0]?.values[0]?.[0] === "classifier" ? "classifier" : "opencode";
 }
 
 export async function saveApiKey(apiKey: string): Promise<void> {
