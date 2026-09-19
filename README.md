@@ -2,6 +2,8 @@
 
 A browser chess lab where you play White against Jev 1.13 Free through OpenCode Zen. Games stay on the device in SQLite persisted through IndexedDB.
 
+
+![](./assets/demo.png)
 ## Stack
 
 - React + TypeScript + Vite
