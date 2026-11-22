@@ -6,8 +6,11 @@ const SQLITE_BLOB_KEY = "database";
 const CRYPTO_KEY_ID = "api-key-encryption";
 const PROVIDER_KEY = "provider";
 
+export type GameType = "chess" | "connect-four" | "dino";
+
 export type GameRecord = {
   id: string;
+  gameType?: GameType;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -16,6 +19,7 @@ export type GameRecord = {
   playerColor: "w" | "b";
   status: string;
   insight: JevInsight | null;
+  state?: string;
 };
 
 let database: Database | null = null;
@@ -74,13 +78,18 @@ async function openDatabase(): Promise<Database> {
       pgn TEXT NOT NULL,
       player_color TEXT NOT NULL,
       status TEXT NOT NULL,
-      insight_json TEXT
+      insight_json TEXT,
+      game_type TEXT NOT NULL DEFAULT 'chess',
+      state_json TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
   `);
+  const gameColumns = database.exec("PRAGMA table_info(games)")[0]?.values.map((row) => String(row[1])) ?? [];
+  if (!gameColumns.includes("game_type")) database.run("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'chess'");
+  if (!gameColumns.includes("state_json")) database.run("ALTER TABLE games ADD COLUMN state_json TEXT NOT NULL DEFAULT ''");
   await persistDatabase();
   return database;
 }
@@ -98,8 +107,8 @@ export async function saveGame(game: GameRecord): Promise<void> {
   const db = await getDatabase();
   db.run(
     `INSERT OR REPLACE INTO games
-      (id, title, created_at, updated_at, fen, pgn, player_color, status, insight_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, title, created_at, updated_at, fen, pgn, player_color, status, insight_json, game_type, state_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       game.id,
       game.title,
@@ -110,20 +119,28 @@ export async function saveGame(game: GameRecord): Promise<void> {
       game.playerColor,
       game.status,
       game.insight ? JSON.stringify(game.insight) : null,
+      game.gameType ?? "chess",
+      game.state ?? "",
     ],
   );
   await persistDatabase();
 }
 
-export async function listGames(): Promise<GameRecord[]> {
+export async function listGames(gameType?: GameType): Promise<GameRecord[]> {
   const db = await getDatabase();
-  const result = db.exec("SELECT * FROM games ORDER BY updated_at DESC");
+  const result = db.exec(
+    gameType
+      ? "SELECT * FROM games WHERE game_type = $gameType ORDER BY updated_at DESC"
+      : "SELECT * FROM games ORDER BY updated_at DESC",
+    gameType ? { $gameType: gameType } : undefined,
+  );
   if (!result[0]) return [];
   const { columns, values } = result[0];
   return values.map((row) => {
     const record = Object.fromEntries(columns.map((column, index) => [column, row[index]]));
     return {
       id: String(record.id),
+      gameType: record.game_type === "connect-four" || record.game_type === "dino" ? record.game_type : "chess",
       title: String(record.title),
       createdAt: Number(record.created_at),
       updatedAt: Number(record.updated_at),
@@ -132,6 +149,7 @@ export async function listGames(): Promise<GameRecord[]> {
       playerColor: record.player_color as "w" | "b",
       status: String(record.status),
       insight: record.insight_json ? JSON.parse(String(record.insight_json)) as JevInsight : null,
+      state: String(record.state_json ?? ""),
     };
   });
 }

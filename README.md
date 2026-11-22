@@ -1,6 +1,6 @@
 # Jev Plays Chess
 
-A browser chess lab where you play White against Jev 1.13 Free through OpenCode Zen or classifier.dev. Games stay on the device in SQLite persisted through IndexedDB.
+A browser game lab where you play Chess and Connect Four against Jev 1.13 Free, while Jev independently plays a Chrome-Dino-style runner. Games stay on the device in SQLite persisted through IndexedDB.
 
 
 ![](./assets/demo.png)
@@ -92,12 +92,11 @@ The workflow installs dependencies with `npm ci`, runs the production build, and
 
 ## How a move works
 
-1. `chess.js` validates the move and updates the local position.
-2. The app sends the FEN, PGN, and all currently legal moves to the selected provider.
+1. Chess and Connect Four validate moves locally before applying them.
+2. The Dino runner sends Jev the approaching cactus and asks for `jump` or `wait`.
 3. OpenCode requests go through `/api/jev` and the Worker forwards them to OpenCode Zen using the browser-provided API key.
-4. classifier.dev receives the legal UCI moves in its classifier labels and returns one selected move.
-5. The app validates the selected UCI move before applying it.
-6. The current game and provider decision data are saved locally.
+4. classifier.dev receives legal actions in its classifier labels and returns one selected action.
+5. The current game and provider decision data are saved locally.
 
 Jev is a structured decision model, not a traditional chess engine. The app gives it only legal moves to choose from, so the browser remains responsible for chess rules.
 
@@ -113,9 +112,11 @@ The Cloudflare Worker does not store the key. It forwards the `Authorization` he
 
 ```text
 src/
-  App.tsx             Main chess UI and game flow
+  App.tsx             Shared shell, tabs, and player settings
+  games/chess/        Chess UI and rules
+  games/connect-four/ Connect Four UI and rules
+  games/dino/         Autonomous Chrome-Dino-style runner and rules
   styles.css          Visual design and responsive layout
-  lib/chess.ts        Board helpers and piece rendering data
   lib/jev.ts          Direct Jev request and response parsing
   lib/storage.ts      SQLite persistence and Web Crypto key storage
   main.tsx            React entry point
